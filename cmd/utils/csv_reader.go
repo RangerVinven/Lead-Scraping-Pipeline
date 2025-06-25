@@ -12,6 +12,7 @@ type Lead struct {
 	CompanyName string
 	PhoneNumber string
 	Website string
+	Email string
 }
 
 func ReadCSV(fileName string) []Lead {

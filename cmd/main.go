@@ -68,12 +68,23 @@ func main() {
 }
 
 func processLead(lead utils.Lead, seenLeadsWebsites *SafeSeenLeadsWebsites, client *http.Client) {
+	fmt.Println("Getting the emails and markdown for:", lead.CompanyName)
 	// Scrapes the website for emails, and copies the HTML
-	// emails, markdown, err := getEmailsAndMarkdown(lead.Website, client)
+
+	emails, markdown, err := getEmailsAndMarkdown(lead.Website, client)
 	getEmailsAndMarkdown(lead.Website, client)
-	// if err != nil {
-	// 	fmt.Println("Error getting the emails and markdown. Recieved error: %w", err)
-	// }
+	fmt.Println("Got the emails and markdown for", lead.CompanyName)
+	if err != nil {
+		fmt.Println("Error getting the emails and markdown. Recieved error: %w", err)
+	}
+
+	if len(emails) == 0 {
+		fmt.Println("Found no emails for:", lead.CompanyName)
+		return
+	}
+
+	lead.Email = emails[0]
+	markdown = markdown
 
 	// Calls OpenAI to write a summarisation of the website's content
 
@@ -252,7 +263,7 @@ func getEmailsFromHTML(html string, websiteURL string) []string {
 }
 
 func convertHTMLToMarkdown(html string) string {
-	markdown, err := htmltomarkdown.ConvertString(html)
+	markdown,err := htmltomarkdown.ConvertString(html)
 	if err != nil {
 		fmt.Errorf("Couldn't convert HTML to markdown. Recieved error: %w", err)
 	}
@@ -283,3 +294,4 @@ func isDomainFromCommonProvider(email string) bool {
 
 	return false
 }
+
