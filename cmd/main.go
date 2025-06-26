@@ -2,14 +2,17 @@ package main
 
 import (
 	"Lead-Automation-Pipeline/cmd/utils"
+	"bufio"
 	"encoding/csv"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,7 +29,7 @@ type SafeSeenLeadsWebsites struct {
 
 type SafeAllProcessedLeads struct {
 	mu sync.Mutex
-	allProcessedLeads []utils.Lead
+	leads []utils.Lead
 }
 
 func main() {
@@ -35,76 +38,37 @@ func main() {
 	// Ensures the user passes in the queries file and the output file
 	var args = os.Args
 	if len(args) != 3 {
-		fmt.Errorf("Program must be run with the <queries.txt> and <output.csv> file")
+		fmt.Errorf("Program must be run with the <keywords.txt> and <output.csv> file")
 	}
-
-	// TODO:
-	// 1. Read the queries file, and split the keywords up into their own folder inside temp/ (and into an array)
-	// 2. Loop over those keywords, running the entire pipeline on each keyword/query
-
-	// Runs the google maps scraper
-	// cmd := exec.Command("google-maps-scraper", "-input", args[1], "-results", )
-	//
-	//            'google-maps-scraper',
-	//            '-input', kw_input_path,
-	//            '-results', raw_csv_path,
-	//            '-c', '3',
-	//            '-exit-on-inactivity', '3m'
 
 	// The websites of all the leads whos been seen so far
-	var seenLeadsWebsites = SafeSeenLeadsWebsites{}
-
-	// Reads the email, phone number, and website from the results
-	var leads = utils.ReadCSV("output.csv")
-
-	// Checks whether any of the clients have already been scraped
-	for i := 0; i < len(leads); i++ {
-		if slices.Contains(seenLeadsWebsites.websites, leads[i].Website) {
-			leads = append(leads[:i], leads[i+1:]...)
-			i--
-		}
-	}
-
-	var wg sync.WaitGroup
-	var numOfGoroutines = 5
-	client := http.Client {
-		Timeout: 10 * time.Second,
-	}
-
-	// Splits the leads into chunks, one chunk per goroutine
-	var leadChunks = splitLeadsUp(leads, numOfGoroutines)
+	// var seenLeadsWebsites = SafeSeenLeadsWebsites{}
 	var allProcessedLeads = SafeAllProcessedLeads{}
 
-	// Starts a goroutine for each chunk
-	for _, chunk := range leadChunks {
-		wg.Add(1)
-
-		// This anonymous function stops you from needing
-		// to loop over the chunk inside the processLead() function
-		go func(c []utils.Lead) {
-			defer wg.Done()
-
-			for _, lead := range chunk {
-				processedLead, err := processLead(lead, &seenLeadsWebsites, &client)
-				if err != nil {
-					fmt.Errorf("Error processing", lead.CompanyName, "Recieved Error:", err)
-					continue
-				} 
-
-				if processedLead.Email != "" {
-					allProcessedLeads.mu.Lock()
-					allProcessedLeads.allProcessedLeads = append(allProcessedLeads.allProcessedLeads, processedLead)
-					allProcessedLeads.mu.Unlock()
-				}
-			}
-		}(chunk)
+	fmt.Println("Splitting keywords into their own file...")
+	// Split keywords into their own files
+	var keywordFiles = splitKeywordsUp(args[1])
+	err := os.Mkdir("temp/processedLeads/", 0755)
+	if err != nil {
+		fmt.Errorf("Failed to create the processedLeads directory. Recieved error:", err)
 	}
 
-	wg.Wait()
+	// Loop over the files, calling the runPipeline function()
+	for _, keywordFile := range keywordFiles {
+		var scraperOutputFile = strings.Replace(keywordFile, ".txt", ".csv", -1)
+		// var pipelineOutputFile = strings.Replace(scraperOutputFile, "temp/", "temp/processedLeads/", -1)
 
-	fmt.Println("Saving results to the CSV...")
-	// Saves the final results in the output file specified by the user
-	saveToCSVFile(allProcessedLeads.allProcessedLeads, "program-output.csv")
+		fmt.Println("Running scraper on", keywordFile + "...")
+		runScraper(keywordFile, scraperOutputFile)
+
+		fmt.Println("Running the pipeline", keywordFile + "...")
+		// runPipeline(scraperOutputFile, pipelineOutputFile, &seenLeadsWebsites, &allProcessedLeads)
+		fmt.Println("Finished the pipeline for", keywordFile + "!")
+	}
+
+	fmt.Println("Saving final results to", args[2] + "...")
+	// Saves all the leads
+	saveToCSVFile(allProcessedLeads.leads, args[2])
 	fmt.Println("Complete!")
 }
 
@@ -113,7 +77,6 @@ func processLead(lead utils.Lead, seenLeadsWebsites *SafeSeenLeadsWebsites, clie
 	// Scrapes the website for emails, and copies the HTML
 
 	emails, markdown, err := getEmailsAndMarkdown(lead.Website, client)
-	getEmailsAndMarkdown(lead.Website, client)
 	fmt.Println("Got the emails and markdown for", lead.CompanyName)
 	if err != nil {
 		fmt.Println("Error getting the emails and markdown. Recieved error: %w", err)
@@ -362,4 +325,115 @@ func saveToCSVFile(processedLeads []utils.Lead, outputFileName string) error {
 	}
 
 	return nil
+}
+
+func splitKeywordsUp(keywordsFileName string) []string {
+	// Gets the epoch time
+	var epochTime = time.Now().Unix()
+	var fileNames = []string{}
+
+	err := os.Mkdir("temp", 0755)
+	if err != nil {
+		fmt.Errorf("Failed to create the temp directory. Recieved error:", err)
+	}
+
+	file, err := os.Open(keywordsFileName)
+	if err != nil {
+		fmt.Errorf("Failed to keywords file. Recieved error:", err)
+	}
+	defer file.Close()
+
+	// Scans the file
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := scanner.Text()
+		filename := "temp/" + line + "_" + strconv.Itoa(int(epochTime)) + ".txt"
+		filename = strings.Replace(filename, " ", "_", -1)
+
+		err := os.WriteFile(filename, []byte(line), 0644)
+		if err != nil {
+			fmt.Printf("Failed to create keyword file", filename + ". Recieved error:", err)
+			continue
+		}
+
+		fileNames = append(fileNames, filename)
+	}
+	
+	if err := scanner.Err(); err != nil {
+		fmt.Printf("Error when reading keywords file. Recieved error:", err)
+	}
+
+	return fileNames
+}
+
+func runScraper(keywordFileName string, outputFileName string) error {
+	out, err := exec.Command("google-maps-scraper", "-input", keywordFileName, "-results", outputFileName, "-c", "3", "-exit-on-inactivity", "3m").Output()
+
+	if err != nil {
+		fmt.Println(err.Error())
+		fmt.Errorf("scraper error: %v\nOutput:\n%s", err)
+	}
+
+	fmt.Printf("Otuput from ls is: %s", out)
+	return nil
+}
+
+
+func runPipeline(keywordFileName string, outputFileName string, seenLeadsWebsites *SafeSeenLeadsWebsites, allProcessedLeads *SafeAllProcessedLeads) {
+	// Reads the email, phone number, and website from the results
+	var leads = utils.ReadCSV(keywordFileName)
+
+	// Checks whether any of the clients have already been scraped
+	for i := 0; i < len(leads); i++ {
+		if slices.Contains(seenLeadsWebsites.websites, leads[i].Website) {
+			leads = append(leads[:i], leads[i+1:]...)
+			i--
+		}
+	}
+
+	var wg sync.WaitGroup
+	var numOfGoroutines = 5
+	client := http.Client {
+		Timeout: 10 * time.Second,
+	}
+
+	// Splits the leads into chunks, one chunk per goroutine
+	var leadChunks = splitLeadsUp(leads, numOfGoroutines)
+	var keywordProcessedLeads SafeAllProcessedLeads
+
+	// Starts a goroutine for each chunk
+	for _, chunk := range leadChunks {
+		wg.Add(1)
+
+		// This anonymous function stops you from needing
+		// to loop over the chunk inside the processLead() function
+		go func(c []utils.Lead) {
+			defer wg.Done()
+
+			for _, lead := range chunk {
+				processedLead, err := processLead(lead, seenLeadsWebsites, &client)
+				if err != nil {
+					fmt.Errorf("Error processing", lead.CompanyName, "Recieved Error:", err)
+					continue
+				} 
+
+				if processedLead.Email != "" {
+					allProcessedLeads.mu.Lock()
+					allProcessedLeads.leads = append(allProcessedLeads.leads, processedLead)
+					allProcessedLeads.mu.Unlock()
+
+					keywordProcessedLeads.mu.Lock()
+					keywordProcessedLeads.leads = append(allProcessedLeads.leads, processedLead)
+					keywordProcessedLeads.mu.Unlock()
+				}
+			}
+		}(chunk)
+	}
+
+	wg.Wait()
+
+	fmt.Println("Saving results to the CSV...")
+	// Saves the final results in the output file specified by the user
+	saveToCSVFile(keywordProcessedLeads.leads, outputFileName)
+	fmt.Println("Complete!")
 }
