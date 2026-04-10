@@ -50,52 +50,35 @@ Rules:
 	return abstracts
 }
 
-func GenerateIcebreaker(abstracts []string) string {
+func GenerateIcebreaker(abstracts []string, email string) (string, string) {
 	var combinedAbstracts = strings.Join(abstracts, "\n---\n")
 
-// 	var prompt = `
-// We just scraped a series of web pages for a business. Your task is to take their summaries and turn them into catchy, personalized openers for a cold email campaign to imply the rest of the campaign is personalised.
-//
-// You'll return your icebreakers in the following JSON format:
-//
-// {"icebreaker": "Hey {name},\n\nLove {thing}—also doing/like/a fan of {otherThing}. Wanted to run something by you.\n\nHope you'll forgive me, but I checked out your site quite a bit. I can see that {anotherThing} is important to you guys (or at least I'm assuming this given the focus on {fourthThing}). You seem like an awesome company, which means you probably get a lot of clients. I know it can be hard to service so many clients, which is what I'm here for."}
-//
-// Icebreaker Rules:
-// - Use a spartan/laconic tone.
-// - Follow the format exactly.
-// - Shorten company and location names when possible.
-// - Avoid obvious compliments. Focus on small, unique details.
-// - If you don't know the owner's name, just put "Hey,"
-// - Talk in first and second person only. Say "I" and "you", never "their".
-//
-// Example output:
-//
-// {"icebreaker": "Hey Aina,\n\nLove what you're doing at Maki-also a fan of how you make it easy for folks to reach out directly. Wanted to run something by you.\n\nI hope you'll forgive me, but I checked out your website quite a bit. I can see that discretion is important to you guys (or at least I'm assuming this given the part on your website about white-labeling your services).\n\nYou seem like an awesome company, which means you probably get a lot of clients. I know it can be hard to service so many clients, which is what I'm here for."}
-// `
+	var prompt = fmt.Sprintf(`
+We just scraped a series of web pages for a business. Your task is two-fold:
+1. Identify the First Name of the most appropriate person to contact using the provided email: %s
+2. Use that information to write a personalized cold email icebreaker.
 
-
-	var prompt = `
-We just scraped a series of web pages for a business. Your task is to take their summaries and turn them into catchy, personalized openers for a cold email campaign to imply the rest of the campaign is personalised.
-
-You'll return your icebreakers in the following JSON format:
-
-{"icebreaker": "Hey {name},\n\nLove {thing}—also doing/like/a fan of {otherThing}. Wanted to run something by you.\n\nHope you'll forgive me, but I checked out your site quite a bit. I can see that {anotherThing} is important to you guys (or at least I'm assuming this given the focus on {fourthThing}). You seem like an awesome company, which means you probably get a lot of clients."}
+Name Extraction Rules:
+- Cross-reference the email prefix (the part before @) with the website summaries.
+- If the email is 'dhoward@' and you find 'David Howard' in the text, the name is 'David'.
+- If the email prefix is a full name like 'sara@', use 'Sara'.
+- NEVER return a single initial (e.g., 'D'). If you only have an initial, return "Unknown".
+- NEVER return system names (e.g., 'Info', 'Admin', 'Office', 'Sales', 'Hello'). If the email is generic and no specific owner is mentioned in the text, return "Unknown".
+- If you find no specific name with high confidence, return "Unknown".
 
 Icebreaker Rules:
+- If name is "Unknown", start with "Hey,". Otherwise, start with "Hey {FirstName},".
 - Use a spartan/laconic tone.
-- Follow the format exactly.
 - Shorten company and location names when possible.
-- Avoid obvious compliments. Focus on small, unique details.
-- If you don't know the owner's name, just put "Hey,"
-- Talk in first and second person only. Say "I" and "you", never "their".
+- Avoid obvious compliments. Focus on small, unique details from the summaries.
+- Talk in first and second person only ("I" and "you").
 
-Example output:
-
-{"icebreaker": "Hey Aina,\n\nLove what you're doing at Maki-also a fan of how you make it easy for folks to reach out directly. Wanted to run something by you.\n\nI hope you'll forgive me, but I checked out your website quite a bit. I can see that discretion is important to you guys (or at least I'm assuming this given the part on your website about white-labeling your services).\n\nYou seem like an awesome company, which means you probably get a lot of clients."}
-`
+Return your response in this JSON format:
+{"firstName": "Name or Unknown", "icebreaker": "Your personalized message here"}
+`, email)
 	
 	client := openai.NewClient(
-		option.WithAPIKey(os.Getenv("OPENAI_API_KEY")), // defaults to os.LookupEnv("OPENAI_API_KEY")
+		option.WithAPIKey(os.Getenv("OPENAI_API_KEY")),
 	)
 	chatCompletion, err := client.Chat.Completions.New(context.TODO(), openai.ChatCompletionNewParams{
 		Messages: []openai.ChatCompletionMessageParamUnion{
@@ -110,17 +93,17 @@ Example output:
 
 	var jsonStr = chatCompletion.Choices[0].Message.Content
 	
-	var data map[string]interface{}
+	var data map[string]string
 	err = json.Unmarshal([]byte(jsonStr), &data)
 	if err != nil {
 		fmt.Println("Couldn't parse the JSON. Received error:", err)
-		return ""
+		return "", ""
 	}
 
-	icebreaker, ok := data["icebreaker"].(string)
-	if !ok {
-		fmt.Println("Couldn't parse the JSON. Received error:", err)
-		return ""
+	name := data["firstName"]
+	if name == "Unknown" || name == "unknown" {
+		name = ""
 	}
-	return icebreaker
+
+	return name, data["icebreaker"]
 }
