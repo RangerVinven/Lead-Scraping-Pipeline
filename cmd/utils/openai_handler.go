@@ -50,21 +50,21 @@ Rules:
 	return abstracts
 }
 
-func GenerateIcebreaker(abstracts []string, email string) (string, string) {
+func GenerateIcebreaker(abstracts []string, email string, companyName string) (string, string) {
 	var combinedAbstracts = strings.Join(abstracts, "\n---\n")
 
 	var prompt = fmt.Sprintf(`
 We just scraped a series of web pages for a business. Your task is two-fold:
-1. Identify the First Name of the most appropriate person to contact using the provided email: %s
+1. Identify the First Name of the most appropriate person to contact using the provided email: %s and Company Name: %s
 2. Use that information to write a personalized cold email icebreaker.
 
-Name Extraction Rules:
-- Cross-reference the email prefix (the part before @) with the website summaries.
-- If the email is 'dhoward@' and you find 'David Howard' in the text, the name is 'David'.
-- If the email prefix is a full name like 'sara@', use 'Sara'.
-- NEVER return a single initial (e.g., 'D'). If you only have an initial, return "Unknown".
-- NEVER return system names (e.g., 'Info', 'Admin', 'Office', 'Sales', 'Hello'). If the email is generic and no specific owner is mentioned in the text, return "Unknown".
-- If you find no specific name with high confidence, return "Unknown".
+Name Extraction Rules (In order of priority):
+- FIRST: Cross-reference the email prefix (the part before @) with the website summaries to find a full name match.
+- SECOND: If the email is generic (info, office, etc.) but the Company Name contains a recognizable human first name (e.g., "Stuart's Plumbing", "David Wood Heating"), use that name.
+- THIRD: If the email prefix itself is a full name like 'sara@', use 'Sara'.
+- NEVER return a single initial (e.g., 'D').
+- NEVER return system names (e.g., 'Info', 'Admin', 'Office').
+- If no name can be found with high confidence, return "Unknown".
 
 Icebreaker Rules:
 - If name is "Unknown", start with "Hey,". Otherwise, start with "Hey {FirstName},".
@@ -75,7 +75,7 @@ Icebreaker Rules:
 
 Return your response in this JSON format:
 {"firstName": "Name or Unknown", "icebreaker": "Your personalized message here"}
-`, email)
+`, email, companyName)
 	
 	client := openai.NewClient(
 		option.WithAPIKey(os.Getenv("OPENAI_API_KEY")),

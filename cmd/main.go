@@ -225,7 +225,7 @@ func processLead(lead utils.Lead, seenLeadsWebsites *SafeSeenLeadsWebsites, clie
 
 	println("Generating an icebreaker for", lead.CompanyName)
 	// Calls OpenAI to write an email icebreaker and extract the first name
-	firstName, icebreaker := utils.GenerateIcebreaker(abstracts, lead.Email)
+	firstName, icebreaker := utils.GenerateIcebreaker(abstracts, lead.Email, lead.CompanyName)
 	lead.FirstName = firstName
 	lead.Icebreaker = icebreaker
 
